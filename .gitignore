@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project: oversized data files (hosted on Google Drive instead, see data/LARGE_FILES.md)
+data/food.parquet
+data/off_matched.csv

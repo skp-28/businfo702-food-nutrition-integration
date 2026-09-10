@@ -1,0 +1,78 @@
+erDiagram
+    DIM_PRODUCT {
+        int product_key PK
+        string barcode
+        string product_name
+        string brand
+        string category_raw
+        string category_top
+        string category_sub
+    }
+
+    DIM_DATE {
+        int date_key PK
+        date full_date
+        int year
+        int quarter
+        int month
+        string month_name
+        int day
+        string day_of_week
+        int week_of_year
+    }
+
+    DIM_YEAR {
+        int year_key PK
+        int year
+    }
+
+    DIM_COUNTRY {
+        int country_key PK
+        string iso2
+        string iso3
+        string country_name
+        string income_group
+    }
+
+    DIM_LOCATION {
+        int location_key PK
+        string osm_id
+        float latitude
+        float longitude
+        string location_type
+        int country_key FK
+    }
+
+    FACT_PRICE {
+        int price_key PK
+        int product_key FK
+        int date_key FK
+        int location_key FK
+        int country_key FK
+        float price
+        float price_without_discount
+        string currency
+        bool is_discounted
+    }
+
+    FACT_COUNTRY_ECONOMIC {
+        int economic_key PK
+        int country_key FK
+        int year_key FK
+        float cost_healthy_diet_ppp
+        float affordability_ratio
+        float pct_cannot_afford_healthy_diet
+        float veg_cost_share
+        float population
+        float gdp_per_capita
+        float poverty_headcount_pct
+        float food_insecurity_pct
+    }
+
+    DIM_PRODUCT ||--o{ FACT_PRICE : "priced in"
+    DIM_DATE ||--o{ FACT_PRICE : "observed on"
+    DIM_LOCATION ||--o{ FACT_PRICE : "observed at"
+    DIM_COUNTRY ||--o{ FACT_PRICE : "observed in"
+    DIM_COUNTRY ||--o{ DIM_LOCATION : "located in"
+    DIM_COUNTRY ||--o{ FACT_COUNTRY_ECONOMIC : "reported for"
+    DIM_YEAR ||--o{ FACT_COUNTRY_ECONOMIC : "reported in"
