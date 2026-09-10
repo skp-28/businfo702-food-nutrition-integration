@@ -1,4 +1,4 @@
-# Member 2: Star Schema & SQLite ELT
+# Star Schema & SQLite ELT
 
 Main objective: convert the three validated datasets (Open Food Facts, Open Prices, World Bank
 FPN + WDI) into a defensible dimensional warehouse, and document the full Extract, Load and
@@ -90,6 +90,27 @@ Rather than leaving Country as a flat dimension with only one hierarchy in the w
 year.** The real classification changes annually and is not present in the extracted data. This
 should be described in the final report exactly as it is here: a reasonable derived attribute,
 not a source-verified field.
+
+### Decision 3: Snowflaking both hierarchies into their own dimension tables
+
+The original design stored `category_top`/`category_sub` as flat text columns on `DIM_PRODUCT`,
+and `income_group` as a flat text column on `DIM_COUNTRY`. Both are now split into their own
+dimension tables, `DIM_CATEGORY` and `DIM_INCOME_GROUP`, referenced by foreign key.
+
+**Reasoning**:
+- Both hierarchies (Product to Category_Sub to Category_Top, and Country to Income_Group) are
+  now backed by an actual queryable dimension table, rather than text repeated across every
+  fact row that shares a category or income band.
+- `DIM_INCOME_GROUP` now carries the GDP thresholds (`gdp_lower_bound`, `gdp_upper_bound`)
+  explicitly as data, making Decision 2's approximation inspectable in the schema itself rather
+  than only documented in prose or buried in a Python constant.
+- Re-deriving or adjusting the income classification, or correcting a category mapping, now
+  means updating one small dimension table rather than every row that references it.
+
+**Trade-off**: this adds two tables and one join to every downstream query that previously read
+`category_top` or `income_group` directly off `DIM_PRODUCT`/`DIM_COUNTRY`. All four SQL business
+analytics queries (RQ1, RQ2, RQ3, RQ4), the Section 7 chart-generation script, and the validation
+queries were updated to join through the new dimensions.
 
 ---
 

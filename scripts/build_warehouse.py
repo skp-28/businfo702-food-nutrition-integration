@@ -45,7 +45,7 @@ except ImportError:
 # CONFIG - edit these paths if your files are named or located differently
 # ---------------------------------------------------------------------------
 OFF_MATCHED_CSV = "off_matched_clean.csv"
-OPEN_PRICES_PARQUET = "Open Prices.parquet"
+OPEN_PRICES_PARQUET = "Open_Prices.parquet"
 COUNTRY_CONTEXT_CSV = "country_context.csv"
 ISO_LOOKUP_CSV = "countries_iso3166b.csv"   # iso2,iso3 lookup Member 1 already used
 DB_PATH = "warehouse.db"
@@ -69,6 +69,17 @@ def classify_income(gdp_per_capita):
         if gdp_per_capita <= threshold:
             return label
     return "Unknown"
+
+
+# Income band bounds for DIM_INCOME_GROUP (Variation 3: snowflaked hierarchy).
+# (label, lower_bound, upper_bound) - bounds are None where open-ended.
+INCOME_GROUP_BANDS = [
+    ("Low income", None, 1145),
+    ("Lower-middle income", 1145, 4515),
+    ("Upper-middle income", 4515, 14005),
+    ("High income", 14005, None),
+    ("Unknown", None, None),
+]
 
 
 def split_categories(categories_raw):
@@ -170,14 +181,22 @@ def main():
     print("\n=== Creating schema ===")
 
     db.execute("""
+        CREATE TABLE DIM_CATEGORY (
+            category_key  INTEGER PRIMARY KEY AUTOINCREMENT,
+            category_top  TEXT NOT NULL,
+            category_sub  TEXT NOT NULL,
+            UNIQUE(category_top, category_sub)
+        )
+    """)
+
+    db.execute("""
         CREATE TABLE DIM_PRODUCT (
             product_key   INTEGER PRIMARY KEY AUTOINCREMENT,
             barcode       TEXT UNIQUE NOT NULL,
             product_name  TEXT,
             brand         TEXT,
             category_raw  TEXT,
-            category_top  TEXT NOT NULL,
-            category_sub  TEXT NOT NULL
+            category_key  INTEGER NOT NULL REFERENCES DIM_CATEGORY(category_key)
         )
     """)
 
@@ -202,12 +221,21 @@ def main():
     """)
 
     db.execute("""
+        CREATE TABLE DIM_INCOME_GROUP (
+            income_group_key  INTEGER PRIMARY KEY AUTOINCREMENT,
+            label             TEXT UNIQUE NOT NULL,
+            gdp_lower_bound   REAL,
+            gdp_upper_bound   REAL
+        )
+    """)
+
+    db.execute("""
         CREATE TABLE DIM_COUNTRY (
-            country_key   INTEGER PRIMARY KEY AUTOINCREMENT,
-            iso2          TEXT,
-            iso3          TEXT UNIQUE,
-            country_name  TEXT,
-            income_group  TEXT
+            country_key       INTEGER PRIMARY KEY AUTOINCREMENT,
+            iso2              TEXT,
+            iso3              TEXT UNIQUE,
+            country_name      TEXT,
+            income_group_key  INTEGER REFERENCES DIM_INCOME_GROUP(income_group_key)
         )
     """)
 
@@ -257,10 +285,27 @@ def main():
     db.execute("CREATE INDEX idx_fact_price_date ON FACT_PRICE(date_key)")
     db.execute("CREATE INDEX idx_fact_price_country ON FACT_PRICE(country_key)")
     db.execute("CREATE INDEX idx_fact_econ_country ON FACT_COUNTRY_ECONOMIC(country_key)")
+    db.execute("CREATE INDEX idx_product_category ON DIM_PRODUCT(category_key)")
+    db.execute("CREATE INDEX idx_country_income_group ON DIM_COUNTRY(income_group_key)")
     db.commit()
 
     # =======================================================================
-    # LOAD + TRANSFORM: DIM_PRODUCT (from off_matched_clean.csv)
+    # LOAD: DIM_INCOME_GROUP (Variation 3: snowflaked income hierarchy)
+    # =======================================================================
+    print("\n=== Loading DIM_INCOME_GROUP ===")
+    db.executemany("""
+        INSERT INTO DIM_INCOME_GROUP (label, gdp_lower_bound, gdp_upper_bound)
+        VALUES (?, ?, ?)
+    """, INCOME_GROUP_BANDS)
+    db.commit()
+    income_group_key_by_label = dict(
+        db.execute("SELECT label, income_group_key FROM DIM_INCOME_GROUP").fetchall()
+    )
+    print(f"Loaded {len(INCOME_GROUP_BANDS)} income group bands")
+
+    # =======================================================================
+    # LOAD + TRANSFORM: DIM_CATEGORY, then DIM_PRODUCT
+    # (from off_matched_clean.csv; Variation 3: snowflaked category hierarchy)
     # =======================================================================
     print("\n=== Loading DIM_PRODUCT ===")
     product_rows = []
@@ -289,10 +334,31 @@ def main():
         seen.add(r[0])
         deduped.append(r)
 
+    # build DIM_CATEGORY from the distinct (category_top, category_sub) pairs
+    # found across all products, then insert products against category_key
+    distinct_categories = sorted(set((r[4], r[5]) for r in deduped))
     db.executemany("""
-        INSERT INTO DIM_PRODUCT (barcode, product_name, brand, category_raw, category_top, category_sub)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, deduped)
+        INSERT INTO DIM_CATEGORY (category_top, category_sub)
+        VALUES (?, ?)
+    """, distinct_categories)
+    db.commit()
+    category_key_by_pair = dict(
+        (
+            (top, sub), key
+        ) for top, sub, key in db.execute(
+            "SELECT category_top, category_sub, category_key FROM DIM_CATEGORY"
+        ).fetchall()
+    )
+    print(f"Loaded {len(distinct_categories)} distinct categories")
+
+    product_insert_rows = [
+        (r[0], r[1], r[2], r[3], category_key_by_pair[(r[4], r[5])])
+        for r in deduped
+    ]
+    db.executemany("""
+        INSERT INTO DIM_PRODUCT (barcode, product_name, brand, category_raw, category_key)
+        VALUES (?, ?, ?, ?, ?)
+    """, product_insert_rows)
     db.commit()
     print(f"Loaded {len(deduped)} products ({len(product_rows) - len(deduped)} duplicate barcode(s) skipped)")
 
@@ -325,15 +391,16 @@ def main():
     country_rows = []
     for iso3, row in latest_by_country.items():
         gdp = float(row["gdp_per_capita"]) if row.get("gdp_per_capita") else None
+        income_label = classify_income(gdp)
         country_rows.append((
             iso_lookup.get(iso3),
             iso3,
             row.get("country_name"),
-            classify_income(gdp),
+            income_group_key_by_label[income_label],
         ))
 
     db.executemany("""
-        INSERT INTO DIM_COUNTRY (iso2, iso3, country_name, income_group)
+        INSERT INTO DIM_COUNTRY (iso2, iso3, country_name, income_group_key)
         VALUES (?, ?, ?, ?)
     """, country_rows)
     db.commit()

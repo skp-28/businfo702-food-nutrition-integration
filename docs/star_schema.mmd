@@ -1,12 +1,17 @@
 erDiagram
+    DIM_CATEGORY {
+        int category_key PK
+        string category_top
+        string category_sub
+    }
+
     DIM_PRODUCT {
         int product_key PK
         string barcode
         string product_name
         string brand
         string category_raw
-        string category_top
-        string category_sub
+        int category_key FK
     }
 
     DIM_DATE {
@@ -26,12 +31,19 @@ erDiagram
         int year
     }
 
+    DIM_INCOME_GROUP {
+        int income_group_key PK
+        string label
+        float gdp_lower_bound
+        float gdp_upper_bound
+    }
+
     DIM_COUNTRY {
         int country_key PK
         string iso2
         string iso3
         string country_name
-        string income_group
+        int income_group_key FK
     }
 
     DIM_LOCATION {
@@ -69,6 +81,7 @@ erDiagram
         float food_insecurity_pct
     }
 
+    DIM_CATEGORY ||--o{ DIM_PRODUCT : "classifies"
     DIM_PRODUCT ||--o{ FACT_PRICE : "priced in"
     DIM_DATE ||--o{ FACT_PRICE : "observed on"
     DIM_LOCATION ||--o{ FACT_PRICE : "observed at"
@@ -76,3 +89,4 @@ erDiagram
     DIM_COUNTRY ||--o{ DIM_LOCATION : "located in"
     DIM_COUNTRY ||--o{ FACT_COUNTRY_ECONOMIC : "reported for"
     DIM_YEAR ||--o{ FACT_COUNTRY_ECONOMIC : "reported in"
+    DIM_INCOME_GROUP ||--o{ DIM_COUNTRY : "classifies"

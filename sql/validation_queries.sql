@@ -57,21 +57,47 @@ WHERE d.year_key IS NULL;
 SELECT COUNT(*) AS non_positive_prices FROM FACT_PRICE WHERE price <= 0;
 
 -- 6. Hierarchy sanity check: how many products fell back to "Uncategorised"
---    (expected to be roughly 46.6% per Member 1's documented finding)
+--    (expected to be 47.2% per the real-data run documented in
+--    Member2_Star_Schema_and_ELT.md)
 SELECT
-    category_top,
+    dcat.category_top,
     COUNT(*) AS product_count,
     ROUND(100.0 * COUNT(*) / (SELECT COUNT(*) FROM DIM_PRODUCT), 1) AS pct_of_total
-FROM DIM_PRODUCT
-GROUP BY category_top
+FROM DIM_PRODUCT dp
+JOIN DIM_CATEGORY dcat ON dp.category_key = dcat.category_key
+GROUP BY dcat.category_top
 ORDER BY product_count DESC
 LIMIT 10;
 
 -- 7. Income group distribution (sanity check on the derived Hierarchy 2)
-SELECT income_group, COUNT(*) AS country_count
-FROM DIM_COUNTRY
-GROUP BY income_group
+SELECT ig.label AS income_group, COUNT(*) AS country_count
+FROM DIM_COUNTRY dc
+JOIN DIM_INCOME_GROUP ig ON dc.income_group_key = ig.income_group_key
+GROUP BY ig.label
 ORDER BY country_count DESC;
+
+-- 9. Orphan check: every product must resolve to a real category
+--    (Variation 3: snowflaked DIM_CATEGORY)
+SELECT COUNT(*) AS orphan_product_category
+FROM DIM_PRODUCT p
+LEFT JOIN DIM_CATEGORY c ON p.category_key = c.category_key
+WHERE c.category_key IS NULL;
+
+-- 10. Orphan check: every country must resolve to a real income group
+--     (Variation 3: snowflaked DIM_INCOME_GROUP)
+SELECT COUNT(*) AS orphan_country_income_group
+FROM DIM_COUNTRY co
+LEFT JOIN DIM_INCOME_GROUP ig ON co.income_group_key = ig.income_group_key
+WHERE co.income_group_key IS NULL;
+
+-- 11. Duplicate check: no duplicate (category_top, category_sub) pairs
+SELECT category_top, category_sub, COUNT(*) AS n
+FROM DIM_CATEGORY
+GROUP BY category_top, category_sub
+HAVING COUNT(*) > 1;
+
+-- 12. DIM_INCOME_GROUP should have exactly 5 bands
+SELECT COUNT(*) AS income_group_band_count FROM DIM_INCOME_GROUP;
 
 -- 8. Time coverage check: confirm FACT_PRICE and FACT_COUNTRY_ECONOMIC
 --    actually overlap in the 2017-2025 window Member 1 identified

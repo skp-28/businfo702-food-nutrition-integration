@@ -1,11 +1,17 @@
+CREATE TABLE DIM_CATEGORY (
+            category_key  INTEGER PRIMARY KEY AUTOINCREMENT,
+            category_top  TEXT NOT NULL,
+            category_sub  TEXT NOT NULL,
+            UNIQUE(category_top, category_sub)
+        );
+
 CREATE TABLE DIM_PRODUCT (
             product_key   INTEGER PRIMARY KEY AUTOINCREMENT,
             barcode       TEXT UNIQUE NOT NULL,
             product_name  TEXT,
             brand         TEXT,
             category_raw  TEXT,
-            category_top  TEXT NOT NULL,
-            category_sub  TEXT NOT NULL
+            category_key  INTEGER NOT NULL REFERENCES DIM_CATEGORY(category_key)
         );
 
 CREATE TABLE DIM_DATE (
@@ -24,12 +30,19 @@ CREATE TABLE DIM_YEAR (
             year_key INTEGER PRIMARY KEY
         );
 
+CREATE TABLE DIM_INCOME_GROUP (
+            income_group_key  INTEGER PRIMARY KEY AUTOINCREMENT,
+            label             TEXT UNIQUE NOT NULL,
+            gdp_lower_bound   REAL,
+            gdp_upper_bound   REAL
+        );
+
 CREATE TABLE DIM_COUNTRY (
-            country_key   INTEGER PRIMARY KEY AUTOINCREMENT,
-            iso2          TEXT,
-            iso3          TEXT UNIQUE,
-            country_name  TEXT,
-            income_group  TEXT
+            country_key       INTEGER PRIMARY KEY AUTOINCREMENT,
+            iso2              TEXT,
+            iso3              TEXT UNIQUE,
+            country_name      TEXT,
+            income_group_key  INTEGER REFERENCES DIM_INCOME_GROUP(income_group_key)
         );
 
 CREATE TABLE DIM_LOCATION (
@@ -76,10 +89,24 @@ CREATE INDEX idx_fact_price_country ON FACT_PRICE(country_key);
 
 CREATE INDEX idx_fact_econ_country ON FACT_COUNTRY_ECONOMIC(country_key);
 
-INSERT INTO DIM_PRODUCT (barcode, product_name, brand, category_raw, category_top, category_sub)
-        VALUES (?, ?, ?, ?, ?, ?);  -- (executemany, batch load)
+CREATE INDEX idx_product_category ON DIM_PRODUCT(category_key);
 
-INSERT INTO DIM_COUNTRY (iso2, iso3, country_name, income_group)
+CREATE INDEX idx_country_income_group ON DIM_COUNTRY(income_group_key);
+
+INSERT INTO DIM_INCOME_GROUP (label, gdp_lower_bound, gdp_upper_bound)
+        VALUES (?, ?, ?);  -- (executemany, batch load)
+
+SELECT label, income_group_key FROM DIM_INCOME_GROUP;
+
+INSERT INTO DIM_CATEGORY (category_top, category_sub)
+        VALUES (?, ?);  -- (executemany, batch load)
+
+SELECT category_top, category_sub, category_key FROM DIM_CATEGORY;
+
+INSERT INTO DIM_PRODUCT (barcode, product_name, brand, category_raw, category_key)
+        VALUES (?, ?, ?, ?, ?);  -- (executemany, batch load)
+
+INSERT INTO DIM_COUNTRY (iso2, iso3, country_name, income_group_key)
         VALUES (?, ?, ?, ?);  -- (executemany, batch load)
 
 SELECT iso3, country_key FROM DIM_COUNTRY;
